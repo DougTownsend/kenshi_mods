@@ -23,6 +23,8 @@ namespace
 {
     typedef void (__cdecl *UpdateStatsFn)(CharacterStatsWindow*);
     UpdateStatsFn g_originalUpdateStats = 0;
+    typedef void (__cdecl *UpdateWindowFn)(CharacterStatsWindow*);
+    UpdateWindowFn g_originalUpdateWindow = 0;
     typedef void (__cdecl *SetupStatsFn)(CharacterStatsWindow*);
     SetupStatsFn g_originalSetupStats = 0;
     std::set<MyGUI::Widget*> g_widenedRoots;
@@ -288,6 +290,28 @@ namespace
         return false;
     }
 
+    float GetEffectiveValue(CharStats* stats, StatsEnumerated displayedStat)
+    {
+        // The generic stat getter provides the directly stored modified value.
+        // Kenshi applies the situational combat effects (equipment,
+        // encumbrance, injuries, and combat mode) in these dedicated getters,
+        // so use them for the rows they own. No bonus or penalty is calculated
+        // here: every returned value is supplied by Kenshi itself.
+        switch (displayedStat)
+        {
+        case STAT_MELEE_ATTACK:
+            return stats->getMeleeAttack();
+        case STAT_MELEE_DEFENCE:
+            return stats->getMeleeDefence(false);
+        case STAT_MARTIALARTS:
+            return stats->getMeleeAttack_unarmed(true);
+        case STAT_DODGE:
+            return stats->getDodge(true);
+        default:
+            return stats->getStat(displayedStat, false);
+        }
+    }
+
     void AppendEffectiveValues(CharStats* stats, DatapanelGUI* panel)
     {
         if (!stats || !panel)
@@ -315,18 +339,18 @@ namespace
 
                 // false explicitly asks Kenshi for its effective, modified
                 // value. The existing caption is vanilla's unmodified value.
-                const float effectiveValue = stats->getStat(displayedStat, false);
+                const float effectiveValue = GetEffectiveValue(stats, displayedStat);
                 const std::string caption = line->s2 +
                     " (" + FormatEffectiveValue(effectiveValue) + ")";
                 line->w2->setCaptionWithReplacing(caption);
                 RightAlignValueColumn(panel, line);
             }
         }
+
     }
 
-    void __cdecl UpdateStatsDetour(CharacterStatsWindow* window)
+    void RefreshEffectiveValues(CharacterStatsWindow* window)
     {
-        g_originalUpdateStats(window);
         if (!window || !window->character)
         {
             return;
@@ -340,6 +364,18 @@ namespace
         AppendEffectiveValues(stats, window->skills4Datapanel);
         AppendEffectiveValues(stats, window->statsDatapanel);
         MoveDerivedStatsOutsideWindow(window);
+    }
+
+    void __cdecl UpdateStatsDetour(CharacterStatsWindow* window)
+    {
+        g_originalUpdateStats(window);
+        RefreshEffectiveValues(window);
+    }
+
+    void __cdecl UpdateWindowDetour(CharacterStatsWindow* window)
+    {
+        g_originalUpdateWindow(window);
+        RefreshEffectiveValues(window);
     }
 
     void __cdecl SetupStatsDetour(CharacterStatsWindow* window)
@@ -371,6 +407,23 @@ namespace ShowEffectiveStats
         }
 
         Log("stat screen hook=installed target=CharacterStatsWindow::updateStats source=CharStats::getStat(false)");
+
+        // `update` is virtual, so its C++ member pointer is a dispatch thunk
+        // in this DLL rather than an address in kenshi_x64.exe. KenshiLib also
+        // exposes the game's non-virtual entry point for the same method.
+        const intptr_t updateTarget = KenshiLib::GetRealAddress(&CharacterStatsWindow::_NV_update);
+        if (!updateTarget || KenshiLib::AddHook(updateTarget,
+                                                reinterpret_cast<void*>(&UpdateWindowDetour),
+                                                &g_originalUpdateWindow) != KenshiLib::SUCCESS ||
+            !g_originalUpdateWindow)
+        {
+            g_originalUpdateWindow = 0;
+            Log("stat screen live-update hook=failed feature=disabled");
+        }
+        else
+        {
+            Log("stat screen live-update hook=installed target=CharacterStatsWindow::_NV_update");
+        }
 
         const intptr_t setupTarget = KenshiLib::GetRealAddress(&CharacterStatsWindow::setupStats);
         if (!setupTarget || KenshiLib::AddHook(setupTarget,
