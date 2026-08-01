@@ -11,8 +11,6 @@
 #include <kenshi/gui/CharacterStatsWindow.h>
 #undef private
 
-#include <Windows.h>
-
 #include <iomanip>
 #include <set>
 #include <sstream>
@@ -33,10 +31,6 @@ namespace
     const int kValueColumnWidth = 92;
     const int kValueColumnRightPadding = 8;
     const int kNameColumnRightPadding = 8;
-    DWORD g_lastDiagnosticTick = 0;
-    bool g_loggedDerivedPanelStructure = false;
-    std::set<std::string> g_loggedUnresolvedRows;
-
     MyGUI::Widget* FindWidgetBySuffix(MyGUI::Widget* widget, const std::string& suffix);
 
     int ScaleWidth(int value)
@@ -165,47 +159,26 @@ namespace
         const int lineHeight = line->w2->getHeight();
         line->resize(panelWidget->getWidth(), lineHeight);
         const MyGUI::IntCoord current = line->w2->getCoord();
-        const int left = panelWidget->getWidth() -
+        const int valueLeft = panelWidget->getWidth() -
             kValueColumnWidth - kValueColumnRightPadding;
-        if (left > current.left)
-        {
-            line->w2->setCoord(left, current.top,
-                               kValueColumnWidth, current.height);
-        }
+        const int hoverLeft = line->w1 ? line->w1->getLeft() : current.left;
+
+        // Kenshi attaches the stat-description hover handler to w2, not w1.
+        // Give w2 a transparent hit area covering both captions while keeping
+        // its effective-stat text in the existing right-hand value column.
+        line->w2->setCoord(hoverLeft, current.top,
+                           panelWidget->getWidth() - hoverLeft - kValueColumnRightPadding,
+                           current.height);
+        line->w2->setTextAlign(MyGUI::Align::Right);
 
         if (line->w1)
         {
             const MyGUI::IntCoord name = line->w1->getCoord();
-            const int nameWidth = left - name.left - kNameColumnRightPadding;
+            const int nameWidth = valueLeft - name.left - kNameColumnRightPadding;
             if (nameWidth > name.width)
             {
                 line->w1->setCoord(name.left, name.top, nameWidth, name.height);
             }
-        }
-    }
-
-    bool IsDiagnosticSnapshotDue()
-    {
-        const DWORD now = GetTickCount();
-        if (g_lastDiagnosticTick != 0 && now - g_lastDiagnosticTick < 1000)
-        {
-            return false;
-        }
-        g_lastDiagnosticTick = now;
-        return true;
-    }
-
-    void LogUnresolvedRow(const std::string& panelKey, DataPanelLine* line)
-    {
-        std::ostringstream message;
-        message << "unresolved_stat_row map_key='" << panelKey
-                << "' key_value='" << line->keyValue
-                << "' label='" << line->s1
-                << "' value='" << line->s2 << "'";
-        const std::string identity = panelKey + "\x1f" + line->keyValue + "\x1f" + line->s1;
-        if (g_loggedUnresolvedRows.insert(identity).second)
-        {
-            ShowEffectiveStats::Log(message.str());
         }
     }
 
@@ -231,51 +204,6 @@ namespace
             }
         }
         return 0;
-    }
-
-    void LogWidgetAncestry(const char* role, MyGUI::Widget* widget)
-    {
-        std::ostringstream message;
-        message << "derived_panel " << role;
-        for (int depth = 0; widget && depth != 6; ++depth)
-        {
-            const MyGUI::IntCoord coord = widget->getCoord();
-            message << " depth=" << depth
-                    << " name='" << widget->getName() << "'"
-                    << " coord=" << coord.left << "," << coord.top
-                    << "," << coord.width << "," << coord.height;
-            widget = widget->getParent();
-        }
-        ShowEffectiveStats::Log(message.str());
-    }
-
-    void LogWidgetTree(MyGUI::Widget* widget, int depth)
-    {
-        if (!widget || depth > 3)
-        {
-            return;
-        }
-        LogWidgetAncestry("tree", widget);
-        const size_t childCount = widget->getChildCount();
-        for (size_t index = 0; index < childCount; ++index)
-        {
-            LogWidgetTree(widget->getChildAt(index), depth + 1);
-        }
-    }
-
-    void LogDerivedPanelStructure(CharacterStatsWindow* window)
-    {
-        if (g_loggedDerivedPanelStructure || !window)
-        {
-            return;
-        }
-        g_loggedDerivedPanelStructure = true;
-        LogWidgetAncestry("root", window->getWidget());
-        LogWidgetAncestry("stats_datapanel",
-                          window->statsDatapanel ? window->statsDatapanel->getWidget() : 0);
-        MyGUI::Widget* const root = window->getWidget();
-        LogWidgetAncestry("derived_title", FindWidgetBySuffix(root, "_lbDerivedStats"));
-        LogWidgetTree(root, 0);
     }
 
     void WidenStatsWindow(CharacterStatsWindow* window)
@@ -360,7 +288,7 @@ namespace
         return false;
     }
 
-    void AppendEffectiveValues(CharStats* stats, DatapanelGUI* panel, bool diagnosticsDue)
+    void AppendEffectiveValues(CharStats* stats, DatapanelGUI* panel)
     {
         if (!stats || !panel)
         {
@@ -382,10 +310,6 @@ namespace
                 StatsEnumerated displayedStat = STAT_NONE;
                 if (!FindDisplayedStat(entry->first, line, &displayedStat))
                 {
-                    if (diagnosticsDue)
-                    {
-                        LogUnresolvedRow(entry->first, line);
-                    }
                     continue;
                 }
 
@@ -409,17 +333,12 @@ namespace
         }
 
         CharStats* const stats = window->character->getStats();
-        const bool diagnosticsDue = IsDiagnosticSnapshotDue();
-        AppendEffectiveValues(stats, window->attributesDatapanel, diagnosticsDue);
-        AppendEffectiveValues(stats, window->skills1Datapanel, diagnosticsDue);
-        AppendEffectiveValues(stats, window->skills2Datapanel, diagnosticsDue);
-        AppendEffectiveValues(stats, window->skills3Datapanel, diagnosticsDue);
-        AppendEffectiveValues(stats, window->skills4Datapanel, diagnosticsDue);
-        AppendEffectiveValues(stats, window->statsDatapanel, diagnosticsDue);
-        if (diagnosticsDue)
-        {
-            LogDerivedPanelStructure(window);
-        }
+        AppendEffectiveValues(stats, window->attributesDatapanel);
+        AppendEffectiveValues(stats, window->skills1Datapanel);
+        AppendEffectiveValues(stats, window->skills2Datapanel);
+        AppendEffectiveValues(stats, window->skills3Datapanel);
+        AppendEffectiveValues(stats, window->skills4Datapanel);
+        AppendEffectiveValues(stats, window->statsDatapanel);
         MoveDerivedStatsOutsideWindow(window);
     }
 
