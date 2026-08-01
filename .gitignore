@@ -1,0 +1,8 @@
+# Host-specific build and installation runbook.
+mod_build.md
+
+# Codex workspace state.
+.codex/
+
+# MSVC debug symbols are generated build artifacts.
+*.pdb
