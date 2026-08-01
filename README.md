@@ -1,0 +1,1 @@
+AI use disclosure: The code and documentation for these mods was written entirely by Codex and/or Claude Code.
