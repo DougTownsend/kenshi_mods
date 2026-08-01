@@ -15,10 +15,12 @@ is reduced by the character's current condition or equipment.
 
 ## How it works
 
-The mod does not calculate any bonuses or penalties. It asks Kenshi directly
-for each stat's effective value through the game's `CharStats::getStat` API.
-This means equipment, injuries, hunger, racial effects, encumbrance, and other
-game modifiers remain entirely Kenshi's responsibility.
+The mod does not calculate any bonuses or penalties. It reads each value
+directly from Kenshi: most rows use the game's `CharStats::getStat` API, while
+melee attack, melee defence, martial arts, and dodge use Kenshi's dedicated
+context-aware combat getters. Those getters include active equipment,
+encumbrance, injuries, combat mode, and other situational effects that the
+generic stat getter does not always apply.
 
 The Stats window and its child panels are widened so the extra value has room
 beside long stat names. The unused derived-stat panel is kept outside the
