@@ -12,7 +12,6 @@
 #undef private
 
 #include <iomanip>
-#include <set>
 #include <sstream>
 #include <string>
 
@@ -27,7 +26,6 @@ namespace
     UpdateWindowFn g_originalUpdateWindow = 0;
     typedef void (__cdecl *SetupStatsFn)(CharacterStatsWindow*);
     SetupStatsFn g_originalSetupStats = 0;
-    std::set<MyGUI::Widget*> g_widenedRoots;
 
     const float kStatsWindowWidthScale = 1.24f;
     const int kValueColumnWidth = 92;
@@ -216,16 +214,18 @@ namespace
         }
 
         MyGUI::Widget* const root = window->getWidget();
-        if (!root || g_widenedRoots.find(root) != g_widenedRoots.end())
+        if (!root)
         {
             return;
         }
 
+        // Kenshi restores the vanilla geometry whenever it rebuilds a reused
+        // window instance. Therefore this must run for every setup call, not
+        // only for roots we have not seen before.
         const MyGUI::IntCoord coord = root->getCoord();
         root->setCoord(coord.left, coord.top, ScaleWidth(coord.width), coord.height);
         ExpandSkillPanels(window, root);
         ExpandDescriptionPanel(window, root);
-        g_widenedRoots.insert(root);
     }
 
     std::string FormatEffectiveValue(float value)
